@@ -1,5 +1,7 @@
 # AdGate
 
+[![CI](https://github.com/gargshishirr/adgate/actions/workflows/ci.yml/badge.svg)](https://github.com/gargshishirr/adgate/actions/workflows/ci.yml)
+
 **Real-time ad eligibility, budget pacing and fail-closed serving decisions.**
 Java 21 · Spring Boot 3.5 · Kafka · Redis · Resilience4j · Micrometer/Prometheus
 
