@@ -1,0 +1,15 @@
+<configuration>
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+    <include resource="org/springframework/boot/logging/logback/console-appender.xml"/>
+
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+    </root>
+
+    <logger name="org.apache.kafka" level="WARN"/>
+    <logger name="kafka" level="WARN"/>
+    <logger name="state.change.logger" level="WARN"/>
+    <logger name="org.apache.kafka.test.TestUtils" level="OFF"/>
+    <logger name="io.lettuce.core.protocol.ConnectionWatchdog" level="ERROR"/>
+    <logger name="com.github.fppt.jedismock" level="WARN"/>
+</configuration>

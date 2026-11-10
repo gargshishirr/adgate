@@ -1,0 +1,96 @@
+server:
+  port: ${SERVER_PORT:8081}
+
+spring:
+  application:
+    name: eligibility-service
+  threads:
+    virtual:
+      enabled: true
+  mvc:
+    problemdetails:
+      enabled: true
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      # Every Redis call on the serving path is bounded well inside the latency budget.
+      timeout: 40ms
+      connect-timeout: 500ms
+      lettuce:
+        pool:
+          enabled: true
+          max-active: 64
+          max-idle: 64
+          min-idle: 8
+          max-wait: 20ms
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
+    admin:
+      operation-timeout: 5s
+    producer:
+      acks: 1
+      properties:
+        linger.ms: 20
+        max.block.ms: 1000
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus,circuitbreakers
+  endpoint:
+    health:
+      show-details: always
+      probes:
+        enabled: true
+  health:
+    circuitbreakers:
+      enabled: true
+  metrics:
+    tags:
+      application: ${spring.application.name}
+
+logging:
+  level:
+    org.apache.kafka: WARN
+    # Reconnect attempts are logged on every retry; outages are reported by the circuit breaker and metrics instead.
+    io.lettuce.core.protocol.ConnectionWatchdog: ERROR
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      redis:
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 50
+        minimum-number-of-calls: 20
+        failure-rate-threshold: 50
+        slow-call-duration-threshold: 30ms
+        slow-call-rate-threshold: 80
+        wait-duration-in-open-state: 2s
+        permitted-number-of-calls-in-half-open-state: 5
+        automatic-transition-from-open-to-half-open-enabled: true
+        register-health-indicator: true
+
+adgate:
+  latency-budget: 50ms
+  config-refresh: 2s
+  warm-up: 3s
+  spend:
+    partitions: 6
+    discover-partitions: true
+  decisions:
+    publish: true
+    queue-capacity: 10000
+    log-size: 50000
+    log-ttl: 30m
+  engine:
+    max-spend-staleness: 10s
+    max-config-age: 30s
+    device-request-limit: 20
+    device-rate-window: 10s
+    pacing-burst: 0.10
+    pacing-early-day-allowance: 0.02
+    pacing-ramp-fraction: 0.02
+    budget-safety-margin: 0.005
+    blocked-user-agent-tokens: [bot, crawler, spider, headless, python-requests]

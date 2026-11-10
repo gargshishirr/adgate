@@ -1,0 +1,30 @@
+spring:
+  main:
+    web-application-type: none
+    banner-mode: off
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
+    producer:
+      properties:
+        linger.ms: 5
+        max.block.ms: 5000
+
+logging:
+  level:
+    root: WARN
+
+sim:
+  eligibility-url: ${ELIGIBILITY_URL:http://localhost:8081}
+  requests-per-second: 150
+  duration: 90s
+  report-interval: 5s
+  seed-campaigns: true
+  campaigns: 8
+  candidates-per-request: 3
+  devices: 500
+  bot-share: 0.04
+  win-rate: 0.35
+  min-cost-micros: 40000
+  max-cost-micros: 250000
+  duplicate-spend-share: 0.02
+  unknown-campaign-share: 0.02

@@ -1,0 +1,55 @@
+server:
+  port: ${SERVER_PORT:8082}
+
+spring:
+  application:
+    name: spend-aggregator
+  threads:
+    virtual:
+      enabled: true
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      timeout: 2s
+      connect-timeout: 2s
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
+    consumer:
+      group-id: spend-aggregator
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      max-poll-records: 500
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+    listener:
+      type: batch
+      ack-mode: batch
+      concurrency: 3
+      # Short polls let idle consumers prove they are caught up (and advance watermarks) about once a second.
+      poll-timeout: 500ms
+      idle-event-interval: 1s
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  metrics:
+    tags:
+      application: ${spring.application.name}
+
+logging:
+  level:
+    org.apache.kafka: WARN
+    # Reconnect attempts are logged on every retry; outages are reported by the watermark checks and metrics instead.
+    io.lettuce.core.protocol.ConnectionWatchdog: ERROR
+
+adgate:
+  aggregator:
+    spend-partitions: 6
+    replication-factor: 1
+    dedupe-ttl: 2d
+    spend-ttl: 3d
+    watermark-check-interval: 500ms
+    end-offsets-timeout: 2s
