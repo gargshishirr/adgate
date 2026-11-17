@@ -1,0 +1,11 @@
+# Accepted advisories for the CI dependency scan (OSV-Scanner). Each entry needs a reason and an end date.
+
+[[IgnoredVulns]]
+id = "GHSA-j9f9-w8pj-32f8" # CVE-2026-47890
+effectiveUntil = 2027-03-31
+reason = "AdGate does not stream Server-Sent Events with view fragments. The fix exists only in Spring Framework 7 (Spring Boot 4)."
+
+[[IgnoredVulns]]
+id = "GHSA-pc63-qcmh-9cmg" # CVE-2026-47884
+effectiveUntil = 2027-03-31
+reason = "AdGate renders no views (JSON API only), so XsltView is never used. The fix exists only in Spring Framework 7 (Spring Boot 4)."

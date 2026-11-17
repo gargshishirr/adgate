@@ -1,13 +1,15 @@
 server:
+  # Chaos switch. It always binds to 127.0.0.1 (LocalOnlyWebConfig), whatever server.address says.
   port: ${SERVER_PORT:8090}
 
 spring:
   application:
     name: local-infra
 
+# Dev only: both listen on 127.0.0.1 and have no password.
 local-infra:
-  kafka-port: 9092
-  redis-port: 6379
+  kafka-port: ${KAFKA_PORT:9092}
+  redis-port: ${REDIS_PORT:6379}
 
 logging:
   level:

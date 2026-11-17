@@ -15,6 +15,9 @@ logging:
 
 sim:
   eligibility-url: ${ELIGIBILITY_URL:http://localhost:8081}
+  # Same variables as the eligibility service. With a comma-separated list, the first key is used.
+  client-key: ${ADGATE_CLIENT_KEY:}
+  admin-key: ${ADGATE_ADMIN_KEY:}
   requests-per-second: 150
   duration: 90s
   report-interval: 5s

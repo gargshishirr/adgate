@@ -54,7 +54,7 @@ public class CampaignRepository {
                 try {
                     campaign = Optional.of(parse(json));
                 } catch (IllegalStateException e) {
-                        log.warn("Skipping corrupt configuration of campaign {}: {}", id, e.getMessage());
+                    log.warn("Skipping corrupt configuration of campaign {}: {}", id, e.getMessage());
                 }
             }
             result.put(id, campaign);
@@ -71,9 +71,27 @@ public class CampaignRepository {
         redis.opsForSet().add(RedisKeys.CAMPAIGN_INDEX, campaign.id());
     }
 
+    /** Returns true if the campaign existed. */
+    public boolean delete(String campaignId) {
+        Boolean deleted = redis.delete(RedisKeys.campaign(campaignId));
+        Long unindexed = redis.opsForSet().remove(RedisKeys.CAMPAIGN_INDEX, campaignId);
+        return Boolean.TRUE.equals(deleted) || (unindexed != null && unindexed > 0);
+    }
+
+    /** Ids written to Redis by something other than this service are skipped unless they are safe in a key. */
     public Set<String> listIds() {
         Set<String> ids = redis.opsForSet().members(RedisKeys.CAMPAIGN_INDEX);
-        return ids == null ? Set.of() : new TreeSet<>(ids);
+        Set<String> safe = new TreeSet<>();
+        if (ids != null) {
+            for (String id : ids) {
+                if (RedisKeys.isSafeId(id)) {
+                    safe.add(id);
+                } else {
+                    log.warn("Skipping a campaign index entry that is not a valid campaign id");
+                }
+            }
+        }
+        return safe;
     }
 
     public long spentMicros(String campaignId, long nowMillis) {

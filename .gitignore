@@ -6,3 +6,7 @@ target/
 .vscode/
 .DS_Store
 .mvn/wrapper/maven-wrapper.jar
+# Local secrets. deploy/.env.example is the template to copy.
+.env
+.env.*
+!.env.example

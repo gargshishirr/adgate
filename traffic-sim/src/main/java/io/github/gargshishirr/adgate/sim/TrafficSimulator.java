@@ -19,11 +19,13 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.locks.LockSupport;
 import java.util.stream.IntStream;
 
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
+import org.springframework.boot.ExitCodeGenerator;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Component;
 
@@ -40,7 +42,9 @@ import io.github.gargshishirr.adgate.common.Topics;
  * same way it does in production.
  */
 @Component
-class TrafficSimulator implements ApplicationRunner {
+class TrafficSimulator implements ApplicationRunner, ExitCodeGenerator {
+
+    static final String API_KEY_HEADER = "X-API-Key";
 
     private static final String[] QUERIES = {
             "photo editor", "budget planner", "fitness tracker", "puzzle games", "free games",
@@ -56,6 +60,8 @@ class TrafficSimulator implements ApplicationRunner {
     private final KafkaTemplate<String, String> kafka;
     private final ObjectMapper mapper;
     private final SimStats stats = new SimStats();
+    private final AtomicBoolean rejectedKeyReported = new AtomicBoolean();
+    private volatile int exitCode;
 
     TrafficSimulator(SimProperties properties, CampaignSeeder seeder, KafkaTemplate<String, String> kafka, ObjectMapper mapper) {
         this.properties = properties;
@@ -65,7 +71,24 @@ class TrafficSimulator implements ApplicationRunner {
     }
 
     @Override
+    public int getExitCode() {
+        return exitCode;
+    }
+
+    @Override
     public void run(ApplicationArguments args) throws Exception {
+        String clientKey = SimProperties.firstKey(properties.clientKey());
+        String adminKey = SimProperties.firstKey(properties.adminKey());
+        if (clientKey == null || (adminKey == null && properties.seedCampaigns())) {
+            System.err.println("""
+                    traffic-sim needs the API keys of the eligibility service:
+                      ADGATE_CLIENT_KEY  to ask for decisions
+                      ADGATE_ADMIN_KEY   to create the demo campaigns (not needed with --sim.seed-campaigns=false)
+                    If you did not set them, the eligibility service made random ones and printed an
+                    "export ADGATE_ADMIN_KEY=... ADGATE_CLIENT_KEY=..." line at startup. Run that line here first.""");
+            exitCode = 2;
+            return;
+        }
         URI base = properties.eligibilityUrl();
         HttpClient http = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(2))
@@ -74,7 +97,7 @@ class TrafficSimulator implements ApplicationRunner {
         awaitReady(http, base, Duration.ofSeconds(60));
 
         List<String> campaigns = properties.seedCampaigns()
-                ? seeder.seed(http, base, properties.campaigns())
+                ? seeder.seed(http, base, adminKey, properties.campaigns())
                 : IntStream.rangeClosed(1, properties.campaigns()).mapToObj(i -> "c-" + i).toList();
         System.out.printf("Campaigns: %s%nSending %d requests/s for %ds to %s%n", campaigns,
                 properties.requestsPerSecond(), properties.duration().toSeconds(), base);
@@ -91,7 +114,7 @@ class TrafficSimulator implements ApplicationRunner {
         try (ExecutorService workers = Executors.newVirtualThreadPerTaskExecutor()) {
             long next = startNanos;
             while (System.nanoTime() < endNanos) {
-                workers.submit(() -> sendRequest(http, base, campaigns));
+                workers.submit(() -> sendRequest(http, base, clientKey, campaigns));
                 next += periodNanos;
                 long wait = next - System.nanoTime();
                 if (wait > 0) {
@@ -104,12 +127,14 @@ class TrafficSimulator implements ApplicationRunner {
 
         System.out.println();
         System.out.println(stats.summary());
-        printCampaigns(http, base);
+        if (adminKey != null) {
+            printCampaigns(http, base, adminKey);
+        }
     }
 
-    /** Waits until the service reports readiness, i.e. it has finished warming up. */
+    /** Waits until the service reports readiness (the public /readyz probe), i.e. it has finished warming up. */
     private static void awaitReady(HttpClient http, URI base, Duration timeout) throws InterruptedException {
-        HttpRequest probe = HttpRequest.newBuilder(base.resolve("/actuator/health/readiness")).timeout(Duration.ofSeconds(2)).GET().build();
+        HttpRequest probe = HttpRequest.newBuilder(base.resolve("/readyz")).timeout(Duration.ofSeconds(2)).GET().build();
         long deadline = System.nanoTime() + timeout.toNanos();
         while (System.nanoTime() < deadline) {
             try {
@@ -124,7 +149,7 @@ class TrafficSimulator implements ApplicationRunner {
         throw new IllegalStateException("Eligibility service at " + base + " was not ready within " + timeout.toSeconds() + "s");
     }
 
-    private void sendRequest(HttpClient http, URI base, List<String> campaigns) {
+    private void sendRequest(HttpClient http, URI base, String clientKey, List<String> campaigns) {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         String deviceId = "device-" + random.nextInt(properties.devices());
         String userAgent = HUMAN_USER_AGENT;
@@ -154,12 +179,17 @@ class TrafficSimulator implements ApplicationRunner {
             HttpRequest request = HttpRequest.newBuilder(base.resolve("/v1/eligibility"))
                     .timeout(Duration.ofSeconds(2))
                     .header("Content-Type", "application/json")
+                    .header(API_KEY_HEADER, clientKey)
                     .POST(BodyPublishers.ofString(mapper.writeValueAsString(body)))
                     .build();
             HttpResponse<String> response = http.send(request, BodyHandlers.ofString());
             stats.recordLatency((System.nanoTime() - start) / 1_000);
             if (response.statusCode() != 200) {
                 stats.failed.increment();
+                if ((response.statusCode() == 401 || response.statusCode() == 403) && rejectedKeyReported.compareAndSet(false, true)) {
+                    System.err.printf("The eligibility service refused the client key (HTTP %d). Check ADGATE_CLIENT_KEY.%n",
+                            response.statusCode());
+                }
                 return;
             }
             List<String> eligible = new ArrayList<>();
@@ -191,9 +221,10 @@ class TrafficSimulator implements ApplicationRunner {
         }
     }
 
-    private void printCampaigns(HttpClient http, URI base) {
+    private void printCampaigns(HttpClient http, URI base, String adminKey) {
         try {
-            HttpRequest request = HttpRequest.newBuilder(base.resolve("/admin/campaigns")).timeout(Duration.ofSeconds(5)).GET().build();
+            HttpRequest request = HttpRequest.newBuilder(base.resolve("/admin/campaigns")).timeout(Duration.ofSeconds(5))
+                    .header(API_KEY_HEADER, adminKey).GET().build();
             JsonNode views = mapper.readTree(http.send(request, BodyHandlers.ofString()).body());
             System.out.printf("%n%-7s %-7s %-5s %9s %8s %9s %10s%n", "id", "status", "pace", "budget", "spent", "allowed", "spend lag");
             for (JsonNode view : views) {

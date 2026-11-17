@@ -48,6 +48,7 @@ class RedisOutageIntegrationTest {
     @DynamicPropertySource
     static void redisProperties(DynamicPropertyRegistry registry) {
         ApiTestSupport.redisProperties(REDIS, registry);
+        ApiTestSupport.apiKeyProperties(registry);
     }
 
     @AfterAll

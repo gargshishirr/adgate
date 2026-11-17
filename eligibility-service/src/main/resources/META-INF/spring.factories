@@ -1,0 +1,2 @@
+org.springframework.boot.diagnostics.FailureAnalyzer=\
+io.github.gargshishirr.adgate.eligibility.security.InvalidApiKeysFailureAnalyzer

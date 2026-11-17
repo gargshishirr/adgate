@@ -4,3 +4,6 @@
 .vscode/
 *.iml
 *.log
+# Never send local secrets to the Docker build.
+**/.env
+**/.env.*

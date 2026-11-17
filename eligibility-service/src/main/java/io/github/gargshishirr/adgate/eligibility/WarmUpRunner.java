@@ -26,6 +26,8 @@ import io.github.gargshishirr.adgate.eligibility.domain.EligibilityResponse;
 import io.github.gargshishirr.adgate.eligibility.domain.Placement;
 import io.github.gargshishirr.adgate.eligibility.engine.EligibilityEngine;
 import io.github.gargshishirr.adgate.eligibility.engine.ServingState;
+import io.github.gargshishirr.adgate.eligibility.security.ApiKeyFilter;
+import io.github.gargshishirr.adgate.eligibility.security.ApiKeys;
 import io.github.gargshishirr.adgate.eligibility.state.ServingStateLoader;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 
@@ -46,16 +48,18 @@ class WarmUpRunner implements ApplicationRunner {
     private final CircuitBreaker redisBreaker;
     private final Duration duration;
     private final Environment environment;
+    private final ApiKeys keys;
     private final HttpClient http = HttpClient.newHttpClient();
 
     WarmUpRunner(ServingStateLoader loader, EligibilityEngine engine, ObjectMapper mapper, CircuitBreaker redisBreaker,
-                 AdgateProperties properties, Environment environment) {
+                 AdgateProperties properties, Environment environment, ApiKeys keys) {
         this.loader = loader;
         this.engine = engine;
         this.mapper = mapper;
         this.redisBreaker = redisBreaker;
         this.duration = properties.warmUp();
         this.environment = environment;
+        this.keys = keys;
     }
 
     @Override
@@ -83,20 +87,30 @@ class WarmUpRunner implements ApplicationRunner {
     }
 
     /**
-     * An invalid request (no candidates) exercises Tomcat, JSON binding and validation end to end, but is rejected
-     * with 400 before it can create a decision, a metric or a Kafka record.
+     * An invalid request (no candidates) exercises Tomcat, the API key check, JSON binding and validation end to end,
+     * but is rejected with 400 before it can create a decision, a metric or a Kafka record.
      */
     private HttpRequest rejectedHttpRequest() {
         Integer port = environment.getProperty("local.server.port", Integer.class);
         if (port == null) {
             return null;
         }
-        return HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/v1/eligibility"))
+        return HttpRequest.newBuilder(URI.create("http://" + localHost() + ":" + port + "/v1/eligibility"))
                 .timeout(Duration.ofSeconds(2))
                 .header("Content-Type", "application/json")
+                .header(ApiKeyFilter.API_KEY_HEADER, keys.firstClientKey())
                 .POST(HttpRequest.BodyPublishers.ofString(
                         "{\"requestId\":\"warm-up\",\"placement\":\"SEARCH_RESULTS\",\"device\":{\"id\":\"warm-up\"},\"candidates\":[]}"))
                 .build();
+    }
+
+    /** The address this instance listens on, as seen from inside the process. */
+    private String localHost() {
+        String address = environment.getProperty("server.address", "");
+        if (address.isBlank() || address.equals("0.0.0.0") || address.equals("::") || address.equals("[::]")) {
+            return "127.0.0.1";
+        }
+        return address.contains(":") && !address.startsWith("[") ? "[" + address + "]" : address;
     }
 
     private void sendQuietly(HttpRequest request) throws InterruptedException {

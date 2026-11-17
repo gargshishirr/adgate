@@ -4,17 +4,20 @@ import java.time.Duration;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
+import org.springframework.util.unit.DataSize;
 
 /**
  * @param latencyBudget time allowed to assemble serving state; past it the request is declined (fail closed)
  * @param configRefresh how often every cached campaign configuration is reloaded in the background
  * @param warmUp        how long to exercise the serving path at startup before reporting ready (0 disables)
+ * @param maxRequestBody larger request bodies are refused with 413 before they are parsed
  */
 @ConfigurationProperties("adgate")
 public record AdgateProperties(
         @DefaultValue("50ms") Duration latencyBudget,
         @DefaultValue("2s") Duration configRefresh,
         @DefaultValue("3s") Duration warmUp,
+        @DefaultValue("128KB") DataSize maxRequestBody,
         @DefaultValue Spend spend,
         @DefaultValue Decisions decisions) {
 
@@ -28,13 +31,14 @@ public record AdgateProperties(
     /**
      * @param publish       publish every decision to Kafka for funnel analytics and offline replay
      * @param queueCapacity decisions buffered for publishing; when full, new ones are dropped (and counted), never blocking serving
-     * @param logSize       recent decisions kept in memory for the explain and replay endpoints
+     * @param logSize       candidate decisions kept in memory for the explain and replay endpoints (a request with
+     *                      3 candidates uses 3), which bounds memory however large requests are
      * @param logTtl        how long a decision stays explainable
      */
     public record Decisions(
             @DefaultValue("true") boolean publish,
             @DefaultValue("10000") int queueCapacity,
-            @DefaultValue("50000") long logSize,
+            @DefaultValue("150000") long logSize,
             @DefaultValue("30m") Duration logTtl) {
     }
 }

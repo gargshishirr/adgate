@@ -1,0 +1,5 @@
+# Production profile: run with SPRING_PROFILES_ACTIVE=prod.
+adgate:
+  security:
+    # Refuse to start unless ADGATE_ADMIN_KEY and ADGATE_CLIENT_KEY are set, differ, and every key has 32+ characters.
+    require-strong-keys: true
