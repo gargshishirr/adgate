@@ -5,6 +5,8 @@
 **Real-time ad eligibility, budget pacing and fail-closed serving decisions.**
 Java 21 · Spring Boot 3.5 · Kafka · Redis · Resilience4j · Micrometer/Prometheus
 
+**New here? Read the short [GUIDE.md](GUIDE.md)**: how to run it, keep it safe and maintain it.
+
 AdGate is the gate an ad server calls inline for every ad request. Given the candidates that retrieval produced, it
 decides in a few milliseconds which ones may serve, and why the others may not. It enforces daily budgets and even
 pacing from a near-real-time spend pipeline, applies placement and negative-keyword policy, and filters invalid
@@ -26,6 +28,8 @@ returns a structured reason code that flows into downstream analytics.
   analytics publishing that never blocks serving.
 - **Runs anywhere.** A Docker-free local mode (in-process Kafka and Redis with a chaos switch), plus a Docker Compose
   stack with Prometheus and Grafana.
+- **Safe by default.** API keys (separate admin and client keys, rotatable), strict input validation, loopback-only
+  ports, metrics on a separate local port, and a `prod` profile that refuses to start with weak keys.
 
 ## Results (measured on a laptop, local mode)
 
@@ -164,12 +168,27 @@ can also show what would happen against current state.
 ./mvnw -DskipTests package                                       # Windows: mvnw.cmd -DskipTests package
 
 java -jar local-infra/target/local-infra.jar                     # Kafka :9092, Redis :6379, chaos switch :8090
-java -jar spend-aggregator/target/spend-aggregator.jar           # :8082
-java -jar eligibility-service/target/eligibility-service.jar     # :8081
+java -jar spend-aggregator/target/spend-aggregator.jar           # health and metrics on :8082
+java -jar eligibility-service/target/eligibility-service.jar     # API :8081, metrics :8181
+```
+
+The eligibility service needs two API keys: `ADGATE_ADMIN_KEY` and `ADGATE_CLIENT_KEY`. If you do not set them, it makes
+random ones and prints a line like this once at startup:
+
+```text
+   export ADGATE_ADMIN_KEY=4f3c… ADGATE_CLIENT_KEY=9a1b…
+```
+
+Run that line in the terminal where you start the simulation:
+
+```bash
 java -jar traffic-sim/target/traffic-sim.jar --sim.duration=60s  # waits for readiness, seeds campaigns, runs
 ```
 
-Inject failures while the simulation runs:
+Every port listens on `127.0.0.1` only. Change ports with flags, for example `--server.port=18081`, or with
+`KAFKA_PORT` / `REDIS_PORT` for local-infra and `KAFKA_BOOTSTRAP` / `REDIS_PORT` for the services.
+
+Inject failures while the simulation runs (dev only, `POST` only, local calls only):
 
 ```bash
 curl -X POST localhost:8090/chaos/redis/down                     # every Redis command drops the connection
@@ -179,28 +198,39 @@ curl -X POST localhost:8090/chaos/redis/normal
 ```
 
 `local-infra` is a functional stand-in for development. Its in-process Redis is much slower than real Redis, so the
-latencies it produces are pessimistic.
+latencies it produces are pessimistic. It has no passwords, so never run it on a shared server.
 
 ### Option B: Docker Compose (real Kafka and Redis, Prometheus, Grafana)
 
 ```bash
-docker compose -f deploy/docker-compose.yml up --build -d
-docker compose -f deploy/docker-compose.yml --profile sim run --rm traffic-sim
+cp deploy/.env.example deploy/.env                               # then fill in the keys and passwords
+docker compose --env-file deploy/.env -f deploy/docker-compose.yml up --build -d
+docker compose --env-file deploy/.env -f deploy/docker-compose.yml --profile sim run --rm traffic-sim
 ```
 
-Grafana runs at http://localhost:3000 (dashboard "AdGate") and Prometheus at http://localhost:9090.
+- Compose refuses to start until the keys and passwords in `deploy/.env` are set. Make each with `openssl rand -hex 32`.
+- The eligibility service runs with the `prod` profile, so it refuses keys shorter than 32 characters.
+- Redis requires a password. Grafana needs a login (anonymous access and sign-up are off).
+- Every port is published on `127.0.0.1` only. Grafana: http://localhost:3000 (dashboard "AdGate"). Prometheus:
+  http://localhost:9090.
 
 ## API
 
-```http
-POST /v1/eligibility
-{
+Every call needs a key in the `X-API-Key` header (or `Authorization: Bearer <key>`):
+
+- `POST /v1/eligibility` takes a **client** key.
+- Everything else takes the **admin** key: campaigns, explain and replay.
+- Admin and client keys are separate: neither works on the other's endpoints. A missing or wrong key gets `401`, the
+  wrong kind of key gets `403`, both as `application/problem+json`.
+
+```bash
+curl -s localhost:8081/v1/eligibility -H "X-API-Key: $ADGATE_CLIENT_KEY" -H 'Content-Type: application/json' -d '{
   "requestId": "demo-123",
   "placement": "SEARCH_RESULTS",
   "query": "Free Photo Editor",
   "device": { "id": "device-42", "userAgent": "AppStore/3.0 iOS/19.1" },
   "candidates": [ { "adId": "ad-1", "campaignId": "c-1" }, { "adId": "ad-2", "campaignId": "c-2" } ]
-}
+}'
 ```
 
 ```json
@@ -217,15 +247,35 @@ POST /v1/eligibility
 }
 ```
 
-| Endpoint | Purpose |
-|---|---|
-| `POST /v1/eligibility` | Decide eligibility for every candidate of one ad request |
-| `GET /v1/decisions/{requestId}` | Explain a recent decision: request, exact state snapshot, decisions |
-| `POST /v1/decisions/{requestId}/replay?currentState=true` | Prove the decision is reproducible; optionally re-evaluate against current state |
-| `PUT /admin/campaigns/{id}`, `GET /admin/campaigns[/{id}]` | Manage campaigns; view live spend, pacing line and spend lag |
-| `GET /actuator/health/readiness`, `/actuator/prometheus`, `/actuator/circuitbreakers` | Readiness, metrics, breaker state |
+Create or update a campaign, then look at it:
+
+```bash
+curl -s -X PUT localhost:8081/admin/campaigns/c-1 -H "X-API-Key: $ADGATE_ADMIN_KEY" -H 'Content-Type: application/json' \
+  -d '{"status":"ACTIVE","dailyBudgetMicros":20000000,"pacing":"EVEN","negativeKeywords":["free"]}'
+curl -s localhost:8081/admin/campaigns/c-1 -H "X-API-Key: $ADGATE_ADMIN_KEY"
+```
+
+| Endpoint | Key | Purpose |
+|---|---|---|
+| `POST /v1/eligibility` | client | Decide eligibility for every candidate of one ad request |
+| `GET /v1/decisions/{requestId}` | admin | Explain a recent decision: request, exact state snapshot, decisions |
+| `POST /v1/decisions/{requestId}/replay?currentState=true` | admin | Prove the decision is reproducible; optionally re-evaluate against current state |
+| `PUT /admin/campaigns/{id}`, `DELETE /admin/campaigns/{id}`, `GET /admin/campaigns[/{id}]` | admin | Manage campaigns; view live spend, pacing line and spend lag |
+| `GET /livez`, `GET /readyz` | none | Liveness and readiness (status only) |
+| `GET :8181/actuator/prometheus`, `/actuator/circuitbreakers`, `/actuator/health` | none, local port | Metrics, breaker state, health without details |
+
+Input rules (anything else gets `400` with the field names, never the rejected values):
+
+- Ids (`requestId`, device id, `adId`, `campaignId`): 1 to 128 letters, digits, `.`, `_` or `-`, starting with a letter
+  or digit. So user input can never change a Redis or Kafka key.
+- At most 100 candidates per request. Request bodies up to 128 KB (`413` above that).
+- Campaigns: daily budget from 1 micro to 10,000,000 currency units, at most 200 negative keywords of up to 80
+  characters.
 
 ## Observability
+
+Metrics are on the management port (`8181` for the eligibility service, `8082` for the aggregator), which listens on
+`127.0.0.1` only and is never the API port.
 
 | Metric | Meaning |
 |---|---|
@@ -236,10 +286,11 @@ POST /v1/eligibility
 | `adgate_spend_events_total{result}` | Spend events applied, duplicate or invalid |
 | `adgate_spend_watermark_check_failures_total` | Lag checks that could not reach the broker |
 | `adgate_decisions_events_total{outcome}` | Decision records published, failed or dropped |
+| `http_server_requests_seconds_count{status="401"}` | Calls refused for a missing or wrong API key |
 
 ## Tests
 
-52 tests, all runnable without Docker (embedded Kafka and an in-process Redis):
+121 tests, all runnable without Docker (embedded Kafka and an in-process Redis):
 
 - **Engine:** every reason code, the check order, pacing math, deterministic thinning and query normalization.
 - **Ledger and watermarks:** idempotency, UTC bucketing and expiry; watermark logic against Kafka's `MockConsumer`.
@@ -248,12 +299,15 @@ POST /v1/eligibility
   - The HTTP API against Redis.
   - A Redis outage: decisions fail closed, the circuit opens, and latency stays low.
   - Idle campaigns staying fresh, and a corrupt config staying contained.
+- **Security:** missing, wrong and right API keys; admin versus client separation; actuator exposure; the `prod`
+  profile refusing weak keys; input validation; Redis key safety; the dev-only chaos switch.
 
 ```bash
 ./mvnw verify
 ```
 
-CI (GitHub Actions) runs the full test suite. It also builds the container images and validates the Compose file.
+CI (GitHub Actions) runs the full test suite, builds the container images and validates the Compose file. It also
+checks every shipped dependency against the OSV vulnerability database, on each change and weekly.
 
 ## Trade-offs and next steps
 
@@ -280,6 +334,6 @@ adgate/
 ├── spend-aggregator/       Kafka batch listener, idempotent Lua ledger, watermark tracker
 ├── traffic-sim/            closed-loop load generator
 ├── local-infra/            in-process Kafka and Redis with a chaos switch
-├── deploy/                 Docker Compose, Prometheus, Grafana dashboard
-└── .github/workflows/      CI: tests, images, Compose validation
+├── deploy/                 Docker Compose, .env.example, Prometheus, Grafana dashboard
+└── .github/                CI (tests, dependency scan, images, Compose validation) and Dependabot
 ```
