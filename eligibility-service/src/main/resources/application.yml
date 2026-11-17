@@ -1,5 +1,14 @@
 server:
   port: ${SERVER_PORT:8081}
+  # Loopback only by default. Set SERVER_ADDRESS=0.0.0.0 to take calls from other machines (the Docker image does).
+  address: ${SERVER_ADDRESS:127.0.0.1}
+  error:
+    # Errors that happen outside Spring MVC never include the path, message, exception or stack trace.
+    include-path: never
+    include-message: never
+    include-exception: false
+    include-stacktrace: never
+    include-binding-errors: never
 
 spring:
   application:
@@ -10,10 +19,16 @@ spring:
   mvc:
     problemdetails:
       enabled: true
+    # The API only takes JSON. This filter would read PUT/PATCH/DELETE form bodies before the API key check.
+    formcontent:
+      filter:
+        enabled: false
   data:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
+      # Empty means no password (local-infra). Docker Compose sets it from deploy/.env.
+      password: ${REDIS_PASSWORD:}
       # Every Redis call on the serving path is bounded well inside the latency budget.
       timeout: 40ms
       connect-timeout: 500ms
@@ -35,15 +50,22 @@ spring:
         max.block.ms: 1000
 
 management:
+  # Actuator (metrics, Prometheus, circuit breakers) has its own port, on loopback only and never on the API port.
+  # Override with MANAGEMENT_SERVER_PORT / MANAGEMENT_SERVER_ADDRESS (Docker Compose uses 0.0.0.0 inside its network).
+  server:
+    port: 8181
+    address: 127.0.0.1
   endpoints:
     web:
       exposure:
         include: health,info,metrics,prometheus,circuitbreakers
   endpoint:
     health:
-      show-details: always
+      show-details: never
       probes:
         enabled: true
+        # Public /livez and /readyz on the API port: status only, no details.
+        add-additional-paths: true
   health:
     circuitbreakers:
       enabled: true
@@ -73,16 +95,24 @@ resilience4j:
         register-health-indicator: true
 
 adgate:
+  security:
+    # API keys: one key, or several separated by commas so callers can rotate. Admin and client keys must differ.
+    # If one is missing here (local runs), a random key is made at startup and logged once.
+    admin-keys: ${ADGATE_ADMIN_KEY:}
+    client-keys: ${ADGATE_CLIENT_KEY:}
+    # The prod profile turns this on: no generated keys, and every key must be 32+ characters.
+    require-strong-keys: false
   latency-budget: 50ms
   config-refresh: 2s
   warm-up: 3s
+  max-request-body: 128KB
   spend:
     partitions: 6
     discover-partitions: true
   decisions:
     publish: true
     queue-capacity: 10000
-    log-size: 50000
+    log-size: 150000
     log-ttl: 30m
   engine:
     max-spend-staleness: 10s

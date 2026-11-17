@@ -14,6 +14,7 @@ import io.github.gargshishirr.adgate.eligibility.ReplayResult;
 import io.github.gargshishirr.adgate.eligibility.decisions.DecisionRecord;
 import io.github.gargshishirr.adgate.eligibility.domain.EligibilityRequest;
 import io.github.gargshishirr.adgate.eligibility.domain.EligibilityResponse;
+import io.github.gargshishirr.adgate.eligibility.domain.SafeId;
 import jakarta.validation.Valid;
 
 @RestController
@@ -26,21 +27,21 @@ public class EligibilityController {
         this.service = service;
     }
 
-    /** Called inline by the ad server for every ad request. */
+    /** Called inline by the ad server for every ad request. Needs a client key. */
     @PostMapping("/eligibility")
     public EligibilityResponse evaluate(@Valid @RequestBody EligibilityRequest request) {
         return service.evaluate(request);
     }
 
-    /** On-call tooling: the request, the exact state snapshot and the decisions, for a recent request id. */
+    /** On-call tooling (admin key): the request, the exact state snapshot and the decisions, for a recent request id. */
     @GetMapping("/decisions/{requestId}")
-    public ResponseEntity<DecisionRecord> explain(@PathVariable String requestId) {
+    public ResponseEntity<DecisionRecord> explain(@PathVariable @SafeId String requestId) {
         return ResponseEntity.of(service.explain(requestId));
     }
 
-    /** On-call tooling: proves a decision is reproducible, and optionally shows what would happen now. */
+    /** On-call tooling (admin key): proves a decision is reproducible, and optionally shows what would happen now. */
     @PostMapping("/decisions/{requestId}/replay")
-    public ResponseEntity<ReplayResult> replay(@PathVariable String requestId,
+    public ResponseEntity<ReplayResult> replay(@PathVariable @SafeId String requestId,
                                                @RequestParam(defaultValue = "false") boolean currentState) {
         return ResponseEntity.of(service.replay(requestId, currentState));
     }

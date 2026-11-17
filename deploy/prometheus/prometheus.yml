@@ -3,10 +3,11 @@ global:
   evaluation_interval: 5s
 
 scrape_configs:
+  # Metrics are on the eligibility service's management port, which is not the API port and needs no key.
   - job_name: eligibility-service
     metrics_path: /actuator/prometheus
     static_configs:
-      - targets: ["eligibility-service:8081"]
+      - targets: ["eligibility-service:8181"]
 
   - job_name: spend-aggregator
     metrics_path: /actuator/prometheus

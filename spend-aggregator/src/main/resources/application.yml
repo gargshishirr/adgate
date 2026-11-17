@@ -1,5 +1,8 @@
 server:
   port: ${SERVER_PORT:8082}
+  # This port only serves health and metrics, so it listens on loopback by default.
+  # The Docker image sets SERVER_ADDRESS=0.0.0.0; Compose publishes the port on 127.0.0.1 only.
+  address: ${SERVER_ADDRESS:127.0.0.1}
 
 spring:
   application:
@@ -11,6 +14,8 @@ spring:
     redis:
       host: ${REDIS_HOST:localhost}
       port: ${REDIS_PORT:6379}
+      # Empty means no password (local-infra). Docker Compose sets it from deploy/.env.
+      password: ${REDIS_PASSWORD:}
       timeout: 2s
       connect-timeout: 2s
   kafka:
@@ -35,6 +40,13 @@ management:
     web:
       exposure:
         include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: never
+      probes:
+        enabled: true
+        # /livez and /readyz, used by the container health check.
+        add-additional-paths: true
   metrics:
     tags:
       application: ${spring.application.name}

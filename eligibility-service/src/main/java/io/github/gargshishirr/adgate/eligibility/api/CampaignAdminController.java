@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Optional;
 
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -15,6 +16,7 @@ import org.springframework.web.bind.annotation.RestController;
 import io.github.gargshishirr.adgate.common.SpendPartitioner;
 import io.github.gargshishirr.adgate.eligibility.domain.Campaign;
 import io.github.gargshishirr.adgate.eligibility.domain.PacingMode;
+import io.github.gargshishirr.adgate.eligibility.domain.SafeId;
 import io.github.gargshishirr.adgate.eligibility.engine.EngineSettings;
 import io.github.gargshishirr.adgate.eligibility.engine.PacingPolicy;
 import io.github.gargshishirr.adgate.eligibility.state.CampaignConfigCache;
@@ -22,7 +24,10 @@ import io.github.gargshishirr.adgate.eligibility.state.CampaignRepository;
 import io.github.gargshishirr.adgate.eligibility.state.SpendPartitionCount;
 import jakarta.validation.Valid;
 
-/** Campaign management for demos and tests. In production this data would come from the campaign platform. */
+/**
+ * Campaign management for demos and tests. In production this data would come from the campaign platform.
+ * Every endpoint here needs the admin key (see {@code ApiKeyFilter}).
+ */
 @RestController
 @RequestMapping("/admin/campaigns")
 public class CampaignAdminController {
@@ -43,7 +48,7 @@ public class CampaignAdminController {
     }
 
     @PutMapping("/{campaignId}")
-    public Campaign upsert(@PathVariable String campaignId, @Valid @RequestBody CampaignUpsertRequest request) {
+    public Campaign upsert(@PathVariable @SafeId String campaignId, @Valid @RequestBody CampaignUpsertRequest request) {
         Campaign campaign = request.toCampaign(campaignId);
         repository.save(campaign);
         configCache.invalidate(campaignId);
@@ -51,9 +56,17 @@ public class CampaignAdminController {
     }
 
     @GetMapping("/{campaignId}")
-    public ResponseEntity<CampaignView> get(@PathVariable String campaignId) {
+    public ResponseEntity<CampaignView> get(@PathVariable @SafeId String campaignId) {
         Optional<Campaign> campaign = repository.find(campaignId);
         return ResponseEntity.of(campaign.map(this::view));
+    }
+
+    /** Removes the configuration; the campaign then declines with CAMPAIGN_NOT_FOUND. Spend counters expire on their own. */
+    @DeleteMapping("/{campaignId}")
+    public ResponseEntity<Void> delete(@PathVariable @SafeId String campaignId) {
+        boolean deleted = repository.delete(campaignId);
+        configCache.invalidate(campaignId);
+        return deleted ? ResponseEntity.noContent().build() : ResponseEntity.notFound().build();
     }
 
     @GetMapping

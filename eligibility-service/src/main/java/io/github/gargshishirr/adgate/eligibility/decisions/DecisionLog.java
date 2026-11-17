@@ -19,8 +19,10 @@ public class DecisionLog {
     private final Cache<String, DecisionRecord> recent;
 
     public DecisionLog(AdgateProperties properties) {
+        // Weighed by candidates, so memory stays bounded however many candidates each request carries.
         this.recent = Caffeine.newBuilder()
-                .maximumSize(properties.decisions().logSize())
+                .maximumWeight(properties.decisions().logSize())
+                .<String, DecisionRecord>weigher((requestId, record) -> Math.max(1, record.decisions().size()))
                 .expireAfterWrite(properties.decisions().logTtl())
                 .build();
     }

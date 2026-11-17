@@ -1,5 +1,7 @@
 package io.github.gargshishirr.adgate.eligibility.api;
 
+import static io.github.gargshishirr.adgate.eligibility.api.ApiTestSupport.asAdmin;
+import static io.github.gargshishirr.adgate.eligibility.api.ApiTestSupport.asClient;
 import static io.github.gargshishirr.adgate.eligibility.api.ApiTestSupport.expectDetailContains;
 import static io.github.gargshishirr.adgate.eligibility.api.ApiTestSupport.expectReason;
 import static io.github.gargshishirr.adgate.eligibility.api.ApiTestSupport.freshSpendWatermarks;
@@ -52,6 +54,7 @@ class EligibilityApiIntegrationTest {
     @DynamicPropertySource
     static void redisProperties(DynamicPropertyRegistry registry) {
         ApiTestSupport.redisProperties(REDIS, registry);
+        ApiTestSupport.apiKeyProperties(registry);
     }
 
     @AfterAll
@@ -71,12 +74,12 @@ class EligibilityApiIntegrationTest {
         expectReason(requestEligibility(mvc, "r-serve", "photo editor", "c-asap"), 0, "ELIGIBLE")
                 .andExpect(jsonPath("$.decisions[0].eligible").value(true));
 
-        mvc.perform(get("/v1/decisions/r-serve"))
+        mvc.perform(asAdmin(get("/v1/decisions/r-serve")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.state.dependencyStatus").value("OK"))
                 .andExpect(jsonPath("$.state.campaigns.c-asap.spentTodayMicros").value(0));
 
-        mvc.perform(post("/v1/decisions/r-serve/replay").param("currentState", "true"))
+        mvc.perform(asAdmin(post("/v1/decisions/r-serve/replay")).param("currentState", "true"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.reproducible").value(true))
                 .andExpect(jsonPath("$.current[0].reason").value("ELIGIBLE"));
@@ -107,12 +110,12 @@ class EligibilityApiIntegrationTest {
 
     @Test
     void unknownDecisionsAreNotFound() throws Exception {
-        mvc.perform(get("/v1/decisions/never-seen")).andExpect(status().isNotFound());
+        mvc.perform(asAdmin(get("/v1/decisions/never-seen"))).andExpect(status().isNotFound());
     }
 
     @Test
     void rejectsMalformedRequests() throws Exception {
-        mvc.perform(post("/v1/eligibility").contentType(MediaType.APPLICATION_JSON)
+        mvc.perform(asClient(post("/v1/eligibility")).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"requestId\":\"r-bad\",\"placement\":\"SEARCH_RESULTS\",\"device\":{\"id\":\"d\"},\"candidates\":[]}"))
                 .andExpect(status().isBadRequest());
     }
@@ -121,7 +124,7 @@ class EligibilityApiIntegrationTest {
     void adminViewShowsLiveSpendAndFreshness() throws Exception {
         redis.opsForValue().set(RedisKeys.spend("c-asap", RedisKeys.utcDay(System.currentTimeMillis())), "12500000");
 
-        mvc.perform(get("/admin/campaigns/c-asap"))
+        mvc.perform(asAdmin(get("/admin/campaigns/c-asap")))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.spentTodayMicros").value(12_500_000))
                 .andExpect(jsonPath("$.spentPercent").value(25.0))

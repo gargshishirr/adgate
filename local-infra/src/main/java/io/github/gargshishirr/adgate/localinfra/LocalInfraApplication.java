@@ -1,34 +1,34 @@
 package io.github.gargshishirr.adgate.localinfra;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.boot.context.event.ApplicationEnvironmentPreparedEvent;
 import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
-import org.springframework.context.event.EventListener;
-import org.springframework.kafka.test.EmbeddedKafkaBroker;
+import org.springframework.context.ApplicationListener;
+import org.springframework.core.env.Profiles;
 
 /**
  * Docker-free infrastructure for local development: a single-node KRaft Kafka broker and a Redis-compatible
- * server in one JVM. Not for production; it exists so the whole system runs with nothing but a JDK.
+ * server in one JVM. Not for production; it exists so the whole system runs with nothing but a JDK. Everything it
+ * opens listens on 127.0.0.1 only, and nothing has a password.
  */
 @SpringBootApplication
 @ConfigurationPropertiesScan
 public class LocalInfraApplication {
 
-    private static final Logger log = LoggerFactory.getLogger(LocalInfraApplication.class);
-
     public static void main(String[] args) {
-        SpringApplication.run(LocalInfraApplication.class, args);
+        SpringApplication application = new SpringApplication(LocalInfraApplication.class);
+        application.addListeners(refuseProdProfile());
+        application.run(args);
     }
 
-    @EventListener(ApplicationReadyEvent.class)
-    void ready(ApplicationReadyEvent event) {
-        EmbeddedKafkaBroker kafka = event.getApplicationContext().getBean(EmbeddedKafkaBroker.class);
-        LocalInfraProperties properties = event.getApplicationContext().getBean(LocalInfraProperties.class);
-        String port = event.getApplicationContext().getEnvironment().getProperty("local.server.port");
-        log.info("Local infrastructure ready: Kafka {} | Redis localhost:{} | chaos switch http://localhost:{}/chaos/redis",
-                kafka.getBrokersAsString(), properties.redisPort(), port);
+    /** A production-looking environment is a sign this is running somewhere it should not. */
+    static ApplicationListener<ApplicationEnvironmentPreparedEvent> refuseProdProfile() {
+        return event -> {
+            if (event.getEnvironment().acceptsProfiles(Profiles.of("prod"))) {
+                throw new IllegalStateException(
+                        "local-infra is for local development only and must not run with the prod profile");
+            }
+        };
     }
 }

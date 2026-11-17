@@ -73,9 +73,12 @@ class SpendAggregatorIntegrationTest {
         send(new SpendEvent("e-2", "c-1", 250_000, now));
         send(new SpendEvent("e-3", "c-1", 400_000, yesterday));
         kafka.send(Topics.SPEND_EVENTS, "c-1", "{not json").get(); // poison message is skipped, not retried forever
+        send(new SpendEvent("e-4", "c-1:x", 1_000_000, now)); // an id that is not safe in a Redis key is skipped too
+        send(new SpendEvent("e-5", "c-1", 1_000_000, Long.MAX_VALUE)); // so is a time that has no daily bucket
+        send(new SpendEvent("e-6", "c-1", 50_000, now)); // and the events behind them are still applied
 
         await().atMost(Duration.ofSeconds(30)).untilAsserted(() -> {
-            assertThat(redis.opsForValue().get(RedisKeys.spend("c-1", RedisKeys.utcDay(now)))).isEqualTo("1250000");
+            assertThat(redis.opsForValue().get(RedisKeys.spend("c-1", RedisKeys.utcDay(now)))).isEqualTo("1300000");
             assertThat(redis.opsForValue().get(RedisKeys.spend("c-1", RedisKeys.utcDay(yesterday)))).isEqualTo("400000");
         });
 

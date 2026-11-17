@@ -25,7 +25,7 @@ class CampaignSeeder {
         this.mapper = mapper;
     }
 
-    List<String> seed(HttpClient http, URI baseUrl, int campaigns) throws IOException, InterruptedException {
+    List<String> seed(HttpClient http, URI baseUrl, String adminKey, int campaigns) throws IOException, InterruptedException {
         List<String> ids = new ArrayList<>(campaigns);
         for (int i = 1; i <= campaigns; i++) {
             String id = "c-" + i;
@@ -40,6 +40,7 @@ class CampaignSeeder {
             HttpRequest request = HttpRequest.newBuilder(baseUrl.resolve("/admin/campaigns/" + id))
                     .timeout(Duration.ofSeconds(5))
                     .header("Content-Type", "application/json")
+                    .header(TrafficSimulator.API_KEY_HEADER, adminKey)
                     .PUT(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(body)))
                     .build();
             HttpResponse<String> response = http.send(request, HttpResponse.BodyHandlers.ofString());
