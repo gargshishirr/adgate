@@ -7,3 +7,5 @@
 # Never send local secrets to the Docker build.
 **/.env
 **/.env.*
+# The browser playground is not part of any service image.
+playground/
