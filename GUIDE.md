@@ -64,7 +64,10 @@ curl -s localhost:8081/v1/eligibility -H "X-API-Key: $ADGATE_CLIENT_KEY" -H 'Con
 
 - **Update dependencies.** Dependabot opens weekly PRs. Merge them when CI is green. Spring Boot 4 is a planned
   upgrade, not a weekly bump. Security overrides are listed in `pom.xml`; drop each once Spring Boot catches up.
-- **Run the tests.** `./mvnw verify` (no Docker needed).
+- **Run the tests.** `./mvnw verify` (no Docker needed). For the browser playground: `cd playground && npm ci && npm test`.
+- **Changed the engine?** `GoldenVectorsTest` fails until you regenerate `playground/src/engine/golden.json` (the
+  command is in the test's message). Then update the TypeScript port in `playground/src/engine` until
+  `npm test` passes again.
 - **Check for known vulnerabilities.** CI does it on every change and weekly (OSV). Accepted ones, with reasons,
   are in `osv-scanner.toml`.
 - **Read the metrics.** `curl localhost:8181/actuator/prometheus`, or Grafana. Watch
