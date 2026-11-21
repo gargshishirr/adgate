@@ -13,6 +13,21 @@ pacing from a near-real-time spend pipeline, applies placement and negative-keyw
 traffic. It **fails closed**: if any signal it depends on is missing, stale or unreachable, it declines to serve and
 returns a structured reason code that flows into downstream analytics.
 
+## Try it in your browser
+
+**[gargshishirr.github.io/adgate](https://gargshishirr.github.io/adgate/)**: no Java, Kafka or Redis needed. Send ad
+requests, watch live traffic hold even-paced campaigns on their pacing line, flip chaos switches (Redis down, spend
+pipeline stalled, stale config) to see AdGate fail closed, and click any decision to see the exact snapshot and every
+rule the engine checked.
+
+[![The AdGate playground: send an ad request, live traffic with spend tracking the even-pacing line, and chaos switches](docs/screenshots/playground.png)](https://gargshishirr.github.io/adgate/)
+
+The playground runs AdGate's real decision rules, ported to TypeScript in [`playground/`](playground). A Java test
+(`GoldenVectorsTest`) runs the real engine, sampler, query normalizer, pacing math and partitioner over more than 900
+golden vectors and checks them against `playground/src/engine/golden.json`; the playground's tests must reproduce
+every one exactly, detail strings included, so the two cannot drift apart. Redis, Kafka, the spend aggregator, the
+circuit breaker and the traffic are small simulations around the ported engine.
+
 ## Highlights
 
 - **Fail closed, with a reason.** Every input carries its own freshness. Anything missing, stale or unreachable becomes
@@ -290,9 +305,11 @@ Metrics are on the management port (`8181` for the eligibility service, `8082` f
 
 ## Tests
 
-121 tests, all runnable without Docker (embedded Kafka and an in-process Redis):
+122 tests, all runnable without Docker (embedded Kafka and an in-process Redis):
 
 - **Engine:** every reason code, the check order, pacing math, deterministic thinning and query normalization.
+- **Golden vectors:** the real engine over hundreds of scenarios, checked against `playground/src/engine/golden.json`,
+  which the playground's TypeScript port must reproduce exactly (`cd playground && npm test`).
 - **Ledger and watermarks:** idempotency, UTC bucketing and expiry; watermark logic against Kafka's `MockConsumer`.
 - **Integration:**
   - Kafka → aggregator → Redis end to end.
@@ -306,8 +323,16 @@ Metrics are on the management port (`8181` for the eligibility service, `8082` f
 ./mvnw verify
 ```
 
-CI (GitHub Actions) runs the full test suite, builds the container images and validates the Compose file. It also
-checks every shipped dependency against the OSV vulnerability database, on each change and weekly.
+CI (GitHub Actions) runs the full test suite, lints, tests and builds the playground, builds the container images and
+validates the Compose file. It also checks every shipped dependency against the OSV vulnerability database, on each
+change and weekly. Every push to `main` publishes the playground to GitHub Pages.
+
+If you change the engine on purpose, regenerate the golden vectors and make the TypeScript port match them again:
+
+```bash
+./mvnw -q -pl eligibility-service -am test -Dtest=GoldenVectorsTest -Dgolden.write=true -Dsurefire.failIfNoSpecifiedTests=false
+cd playground && npm ci && npm test
+```
 
 ## Trade-offs and next steps
 
@@ -334,6 +359,8 @@ adgate/
 ├── spend-aggregator/       Kafka batch listener, idempotent Lua ledger, watermark tracker
 ├── traffic-sim/            closed-loop load generator
 ├── local-infra/            in-process Kafka and Redis with a chaos switch
+├── playground/             browser playground: TypeScript port of the engine, simulation, UI (Vite + Preact)
 ├── deploy/                 Docker Compose, .env.example, Prometheus, Grafana dashboard
-└── .github/                CI (tests, dependency scan, images, Compose validation) and Dependabot
+├── docs/screenshots/       playground screenshots
+└── .github/                CI (tests, dependency scan, images, Compose validation), Pages deploy and Dependabot
 ```

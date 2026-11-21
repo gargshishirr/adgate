@@ -1,0 +1,45 @@
+name: Playground on GitHub Pages
+
+# Builds the browser playground and publishes it to the gh-pages branch, which GitHub Pages serves at
+# https://gargshishirr.github.io/adgate/ (Settings > Pages > Deploy from a branch: gh-pages, / (root)).
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Build and publish the playground
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: playground
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: playground/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - name: Force-push dist to gh-pages
+        working-directory: playground/dist
+        env:
+          TOKEN: ${{ github.token }}
+        run: |
+          touch .nojekyll
+          git init -q -b gh-pages
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Deploy the playground from ${GITHUB_SHA}"
+          git push -q -f "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" gh-pages
